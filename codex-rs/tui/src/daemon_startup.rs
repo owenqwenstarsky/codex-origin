@@ -87,6 +87,30 @@ pub(super) fn exclusion(
     }
 }
 
+/// Reports whether this process has a non-empty value for a provider `env_key`.
+///
+/// Custom model providers read that variable in whichever process sends the
+/// model request. A shared app-server keeps the environment from its own
+/// start, so a key exported later in the launching shell is invisible there.
+pub(super) fn client_process_has_provider_env_key(env_key: Option<&str>) -> bool {
+    let Some(env_key) = env_key.map(str::trim).filter(|key| !key.is_empty()) else {
+        return false;
+    };
+    std::env::var(env_key)
+        .ok()
+        .is_some_and(|value| !value.trim().is_empty())
+}
+
+/// A daemon started by this process inherited its environment. An already
+/// running daemon did not, so a provider key present here has to be read by
+/// the embedded server instead.
+pub(super) fn should_reuse_shared_daemon(
+    client_has_provider_env: bool,
+    started_daemon_in_this_process: bool,
+) -> bool {
+    started_daemon_in_this_process || !client_has_provider_env
+}
+
 pub(super) fn config_exclusion(
     cli_kv_overrides: &[(String, toml::Value)],
     loader_overrides: &LoaderOverrides,

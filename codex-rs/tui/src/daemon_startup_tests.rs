@@ -6,6 +6,55 @@ use pretty_assertions::assert_eq;
 use tempfile::TempDir;
 
 #[test]
+fn client_process_provider_env_key_requires_a_non_empty_value() {
+    let key = "CODEX_TEST_PROVIDER_ENV_KEY_A72C";
+    unsafe {
+        std::env::remove_var(key);
+    }
+    assert!(!daemon_startup::client_process_has_provider_env_key(None));
+    assert!(!daemon_startup::client_process_has_provider_env_key(Some(
+        ""
+    )));
+    assert!(!daemon_startup::client_process_has_provider_env_key(Some(
+        "   "
+    )));
+    assert!(!daemon_startup::client_process_has_provider_env_key(Some(
+        key
+    )));
+    unsafe {
+        std::env::set_var(key, "   ");
+    }
+    assert!(!daemon_startup::client_process_has_provider_env_key(Some(
+        key
+    )));
+    unsafe {
+        std::env::set_var(key, "secret");
+    }
+    assert!(daemon_startup::client_process_has_provider_env_key(Some(
+        key
+    )));
+    unsafe {
+        std::env::remove_var(key);
+    }
+}
+
+#[test]
+fn shared_daemon_is_reused_only_when_it_inherited_this_process_env() {
+    assert!(daemon_startup::should_reuse_shared_daemon(
+        /*client_has_provider_env*/ false, /*started_daemon_in_this_process*/ false,
+    ));
+    assert!(daemon_startup::should_reuse_shared_daemon(
+        /*client_has_provider_env*/ false, /*started_daemon_in_this_process*/ true,
+    ));
+    assert!(daemon_startup::should_reuse_shared_daemon(
+        /*client_has_provider_env*/ true, /*started_daemon_in_this_process*/ true,
+    ));
+    assert!(!daemon_startup::should_reuse_shared_daemon(
+        /*client_has_provider_env*/ true, /*started_daemon_in_this_process*/ false,
+    ));
+}
+
+#[test]
 fn feature_overrides_allow_daemon_without_allowing_arbitrary_config() {
     for (raw, eligible) in [
         ("features.app_server_websocket_compression=true", true),
