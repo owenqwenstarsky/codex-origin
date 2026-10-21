@@ -580,6 +580,10 @@ pub(super) async fn run_main_inner(
     {
         daemon_exclusion = Some(daemon_startup::WSL_DRVFS_EXCLUSION);
     }
+    let client_has_provider_env = daemon_startup::client_process_has_provider_env_key(
+        config.model_provider.env_key.as_deref(),
+    );
+    let mut started_daemon_in_this_process = false;
     let mut managed_daemon = cli.managed_daemon;
     if auto_start_daemon && daemon_exclusion.is_none() {
         let output = startup_draft
@@ -605,6 +609,11 @@ pub(super) async fn run_main_inner(
             .await??;
         if let Some(output) = output {
             managed_daemon = output.backend.is_some();
+            started_daemon_in_this_process = matches!(
+                output.status,
+                codex_app_server_daemon::LifecycleStatus::Started
+                    | codex_app_server_daemon::LifecycleStatus::Restarted
+            );
             app_server_target = AppServerTarget::LocalDaemon {
                 endpoint: RemoteAppServerEndpoint::UnixSocket {
                     socket_path: AbsolutePathBuf::from_absolute_path_checked(output.socket_path)?,
@@ -615,6 +624,18 @@ pub(super) async fn run_main_inner(
             app_server_target = AppServerTarget::Embedded;
             daemon_exclusion = Some("this Windows launcher");
         }
+    }
+    // `codex -c model_provider=...` already avoids the shared server. Do the same
+    // when this shell has the provider key and the server was started earlier.
+    let provider_env_embedded = implicit_connection
+        && !cli.agents_overview
+        && matches!(app_server_target, AppServerTarget::LocalDaemon { .. })
+        && !daemon_startup::should_reuse_shared_daemon(
+            client_has_provider_env,
+            started_daemon_in_this_process,
+        );
+    if provider_env_embedded {
+        app_server_target = AppServerTarget::Embedded;
     }
     // The overview must inspect the shared server's agents regardless of local settings.
     let compatibility_warning = if cli.agents_overview {
@@ -712,6 +733,7 @@ pub(super) async fn run_main_inner(
         _ if elevated_warning.is_some() => "elevated_windows",
         (_, Some("--no-daemon")) => "explicit_no_daemon",
         (_, Some(_)) => "incompatible_option",
+        _ if provider_env_embedded => "provider_env",
         _ if auto_start_daemon => "auto_start",
         (AppServerTarget::LocalDaemon { .. }, _) => "existing_daemon",
         (AppServerTarget::Embedded, None) => "auto_start_disabled",
